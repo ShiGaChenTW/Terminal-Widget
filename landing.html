@@ -1,0 +1,1192 @@
+<!doctype html>
+<!--
+ ╔══════════════════════════════════════════════════════════════════════╗
+ ║  Terminal Widget for Übersicht — 介紹網站                            ║
+ ║  ──────────────────────────────────────────────────────────────────  ║
+ ║  單一 HTML 檔，零外部相依。直接 open landing.html 或部署到任何       ║
+ ║  static host（GitHub Pages / Vercel / Netlify）皆可。                ║
+ ║                                                                      ║
+ ║  常見調整位置：                                                      ║
+ ║    1. <style> 頂端的 :root CSS 變數 — 換主題色／字型                 ║
+ ║    2. <body> 內各 section 的內容（已加 data-i18n 標籤雙語）          ║
+ ║    3. <script> 頂端 GITHUB_URL 常數 — 換成你的 repo                  ║
+ ║    4. <script> 內 DICT、FEATURES、NOTES 等翻譯字典                   ║
+ ║                                                                      ║
+ ║  需要新增段落 → 在對應 section 內加 HTML，把文字放進 DICT 雙語 key。 ║
+ ╚══════════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title data-i18n="meta.title">Terminal Widget for Übersicht — 桌面內嵌真正的終端機</title>
+<meta name="description" data-i18n-attr="content" data-i18n="meta.desc"
+      content="把 vim、htop、ssh、tmux、fzf 直接嵌進 macOS 桌面的 Übersicht widget。底層 ttyd + xterm.js，前端拖移／縮放／鎖定／多實例。" />
+
+<style>
+  :root {
+    --bg: #0d0d10;
+    --bg-soft: #15151a;
+    --bg-card: #1a1a20;
+    --line: #2a2a32;
+    --fg: #e8e8ec;
+    --fg-soft: #a8a8b0;
+    --fg-mute: #6c6c78;
+    --accent: #5fd7af;
+    --accent-2: #7aa2f7;
+    --accent-3: #f7768e;
+    --warn: #ffbd2e;
+    --mono: 'JetBrains Mono', 'JetBrainsMono Nerd Font', ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, 'Inter', 'PingFang TC', 'Noto Sans TC', sans-serif;
+  }
+  html[lang="en"] :root { --sans: -apple-system, 'Inter', sans-serif; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(circle at 20% -10%, rgba(95,215,175,0.06), transparent 40%),
+      radial-gradient(circle at 90% 10%, rgba(122,162,247,0.05), transparent 45%);
+  }
+
+  a { color: var(--accent-2); text-decoration: none; }
+  a:hover { color: var(--accent); }
+
+  code, pre, kbd { font-family: var(--mono); }
+  code {
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    color: var(--accent);
+  }
+  pre {
+    background: #08080a;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin: 0;
+    line-height: 1.55;
+    font-size: 13px;
+    color: var(--fg-soft);
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  /* ── layout ─────────────────────────────────────────────────────────── */
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    border-bottom: 1px solid var(--line);
+    background: rgba(13,13,16,0.85);
+    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 50;
+  }
+  .nav-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+    gap: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .brand-glyph {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: flex; align-items: center; justify-content: center;
+    color: #000; font-family: var(--mono); font-weight: 700; font-size: 14px;
+  }
+  .nav-right { display: flex; align-items: center; gap: 22px; }
+  .nav-links { display: flex; gap: 22px; font-size: 14px; color: var(--fg-soft); }
+  .nav-links a { color: inherit; }
+  .nav-links a:hover { color: var(--fg); }
+
+  /* ── nav icon button (GitHub) ───────────────────────────────────────── */
+  .nav-icon-btn {
+    width: 30px; height: 30px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-soft);
+    transition: all 0.15s ease;
+  }
+  .nav-icon-btn:hover { color: var(--fg); background: var(--bg-card); }
+  .nav-icon-btn svg { width: 18px; height: 18px; }
+
+  /* ── dependencies row ───────────────────────────────────────────────── */
+  .deps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin: 0 0 40px;
+  }
+  .dep {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 22px 16px 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: inherit;
+    text-align: center;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .dep:hover { border-color: var(--accent); transform: translateY(-2px); color: inherit; }
+  .dep-logo {
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dep-logo img, .dep-logo svg { width: 36px; height: 36px; display: block; }
+  .dep-name { font-size: 14px; font-weight: 600; }
+  .dep-tag  { font-size: 12px; color: var(--fg-mute); font-family: var(--mono); }
+
+  /* ── language toggle ────────────────────────────────────────────────── */
+  .lang-toggle {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px;
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--bg-card);
+    user-select: none;
+  }
+  .lang-toggle button {
+    border: none;
+    background: transparent;
+    color: var(--fg-mute);
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font: inherit;
+    transition: all 0.15s ease;
+  }
+  .lang-toggle button:hover { color: var(--fg); }
+  .lang-toggle button.active {
+    background: var(--accent);
+    color: #0a0a0c;
+    font-weight: 700;
+  }
+
+  /* ── hero ───────────────────────────────────────────────────────────── */
+  section.hero { padding: 96px 0 80px; text-align: center; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 12px; color: var(--fg-soft);
+    margin-bottom: 28px;
+    font-family: var(--mono);
+  }
+  .pill-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+  h1 {
+    font-size: clamp(36px, 6vw, 60px);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin: 0 0 22px;
+    font-weight: 700;
+  }
+  h1 .accent { color: var(--accent); }
+  .tagline {
+    font-size: 18px;
+    color: var(--fg-soft);
+    max-width: 640px;
+    margin: 0 auto 36px;
+  }
+  .cta {
+    display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    color: var(--fg);
+    background: var(--bg-card);
+    font-family: var(--mono);
+    font-size: 13px;
+    transition: all 0.15s ease;
+    cursor: pointer;
+  }
+  .btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: translateY(-1px);
+  }
+  .btn.primary {
+    background: var(--accent);
+    color: #0a0a0c;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .btn.primary:hover {
+    background: #75e6c0;
+    color: #0a0a0c;
+  }
+
+  /* ── terminal mock ──────────────────────────────────────────────────── */
+  .term-mock {
+    margin: 56px auto 0;
+    max-width: 720px;
+    background: #141418;
+    border-radius: 12px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+    overflow: hidden;
+    text-align: left;
+  }
+  .term-bar {
+    height: 8px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.06), transparent);
+  }
+  .term-body {
+    padding: 18px 22px 26px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.65;
+    color: #d4d4d4;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .term-greet { color: var(--accent); }
+  .term-prompt-dir { color: #9ece6a; }
+  .term-prompt-shell { color: var(--accent-2); }
+  .term-prompt-arrow { color: #bb9af7; }
+  .term-cmd { color: #e0e0e0; }
+  .term-out { color: #8a8a92; }
+  .term-cursor {
+    display: inline-block;
+    width: 7px; height: 14px;
+    background: var(--accent);
+    vertical-align: -2px;
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .term-lock {
+    position: relative;
+    margin-top: -36px;
+    margin-left: 12px;
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  }
+
+  /* ── sections ───────────────────────────────────────────────────────── */
+  section { padding: 72px 0; }
+  section + section { border-top: 1px solid var(--line); }
+  h2 {
+    font-size: 28px;
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+    font-weight: 700;
+  }
+  h2 .num {
+    font-family: var(--mono);
+    color: var(--accent);
+    font-size: 0.7em;
+    margin-right: 12px;
+    font-weight: 500;
+  }
+  .lede {
+    color: var(--fg-soft);
+    margin: 0 0 32px;
+    max-width: 640px;
+  }
+
+  /* ── feature grid ───────────────────────────────────────────────────── */
+  .features {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .feat {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 22px;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .feat:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .feat .icon {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(95,215,175,0.18), rgba(122,162,247,0.18));
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    margin-bottom: 14px;
+    font-family: var(--mono); font-weight: 700;
+  }
+  .feat h3 {
+    font-size: 16px; margin: 0 0 6px; font-weight: 600;
+  }
+  .feat p {
+    margin: 0; font-size: 14px; color: var(--fg-soft); line-height: 1.6;
+  }
+
+  /* ── install steps ──────────────────────────────────────────────────── */
+  .steps { display: flex; flex-direction: column; gap: 24px; }
+  .step {
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+  .step-num {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 13px;
+    color: var(--accent);
+  }
+  .step-body h3 {
+    margin: 4px 0 8px; font-size: 16px; font-weight: 600;
+  }
+  .step-body p {
+    margin: 0 0 12px; color: var(--fg-soft); font-size: 14px;
+  }
+  .step-body ul {
+    color: var(--fg-soft); font-size: 14px; margin: 0; padding-left: 20px;
+  }
+
+  /* ── notes ──────────────────────────────────────────────────────────── */
+  .note-grid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  .note {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    background: var(--bg-soft);
+  }
+  .note .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(255,189,46,0.15);
+    color: var(--warn);
+    margin-bottom: 10px;
+  }
+  .note.security .tag { background: rgba(247,118,142,0.15); color: var(--accent-3); }
+  .note.tip .tag      { background: rgba(95,215,175,0.15); color: var(--accent); }
+  .note.info .tag     { background: rgba(122,162,247,0.15); color: var(--accent-2); }
+  .note h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+  .note p  { margin: 0; font-size: 14px; color: var(--fg-soft); }
+
+  /* ── skill card (section 05) ────────────────────────────────────────── */
+  .skill-card {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 32px;
+    background:
+      linear-gradient(180deg, rgba(95,215,175,0.04), transparent 70%),
+      var(--bg-card);
+    position: relative;
+    overflow: hidden;
+  }
+  .skill-card::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2), transparent);
+  }
+  .skill-head {
+    display: flex; align-items: center; gap: 14px; margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .skill-badge {
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: flex; align-items: center; justify-content: center;
+    color: #0a0a0c; font-family: var(--mono); font-weight: 700; font-size: 18px;
+  }
+  .skill-meta { flex: 1; min-width: 200px; }
+  .skill-name {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 0 0 4px;
+  }
+  .skill-tag {
+    font-size: 13px;
+    color: var(--fg-soft);
+  }
+  .skill-stamp {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--accent);
+    background: rgba(95,215,175,0.08);
+  }
+  .skill-card h4 {
+    font-size: 13px; font-family: var(--mono);
+    color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.1em;
+    margin: 22px 0 10px;
+  }
+  .skill-card ul {
+    margin: 0; padding-left: 20px;
+    color: var(--fg-soft); font-size: 14px; line-height: 1.8;
+  }
+  .skill-card ul li code { font-size: 0.85em; }
+  .skill-path {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--fg-mute);
+    word-break: break-all;
+  }
+  .skill-actions {
+    display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px;
+  }
+
+  /* ── license ────────────────────────────────────────────────────────── */
+  .license {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 28px 32px;
+    background: var(--bg-card);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 24px;
+    justify-content: space-between;
+  }
+  .license .badge {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 6px 14px;
+    background: var(--accent);
+    color: #0a0a0c;
+    border-radius: 6px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+  .license-body { flex: 1; min-width: 240px; }
+  .license-body h3 { margin: 0 0 4px; font-size: 18px; }
+  .license-body p { margin: 0; color: var(--fg-soft); font-size: 14px; }
+
+  /* ── footer ─────────────────────────────────────────────────────────── */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 32px 0 48px;
+    text-align: center;
+    color: var(--fg-mute);
+    font-size: 13px;
+  }
+  footer a { color: var(--fg-soft); }
+  footer .stack {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  /* ── small ──────────────────────────────────────────────────────────── */
+  @media (max-width: 700px) {
+    section { padding: 56px 0; }
+    .nav-links { display: none; }
+    h1 { font-size: 36px; }
+    .term-mock { margin-top: 40px; }
+  }
+</style>
+</head>
+
+<body>
+
+<!-- ─── 頂部導覽列 ──────────────────────────────────────────────────────
+     黏性置頂；左側品牌、右側 (1) 章節錨點 (2) GitHub icon (3) 中／英切換 -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="brand">
+      <div class="brand-glyph">❯_</div>
+      <span>Terminal Widget</span>
+    </div>
+    <div class="nav-right">
+      <nav class="nav-links">
+        <a href="#features" data-i18n="nav.features">功能</a>
+        <a href="#install"  data-i18n="nav.install">安裝</a>
+        <a href="#notes"    data-i18n="nav.notes">注意事項</a>
+        <a href="#skill"    data-i18n="nav.skill">Skill</a>
+        <a href="#license"  data-i18n="nav.license">授權</a>
+      </nav>
+
+      <!-- GitHub icon button — 修改下方 GITHUB_URL 變數即可換成你自己的 repo -->
+      <a class="nav-icon-btn" id="ghLink" href="#" target="_blank" rel="noopener"
+         title="Source on GitHub" aria-label="GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.27-1.69-1.27-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.25 3.34.95.1-.74.4-1.25.72-1.54-2.55-.29-5.24-1.27-5.24-5.66 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.16 1.18a10.96 10.96 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.58.23 2.75.11 3.04.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.37-5.25 5.65.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.55C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5Z"/>
+        </svg>
+      </a>
+
+      <div class="lang-toggle" role="group" aria-label="Language">
+        <button data-lang="zh">中文</button>
+        <button data-lang="en">EN</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ─── HERO 區塊 ───────────────────────────────────────────────────────
+     版本 pill、主標題（含 accent 色）、tagline 一句話、兩顆 CTA 按鈕、
+     終端機模擬視覺（動態 cursor + 鎖頭浮動示意）。終端內容由 JS 注入
+     以便切語言。要換 mock 內容改 TERM_MOCK 字典。 -->
+<section class="hero">
+  <div class="wrap">
+    <div class="pill" data-i18n="hero.pill">v1.0 · Übersicht widget · macOS</div>
+
+    <h1 data-i18n-html="hero.title">把<span class="accent">真正的終端機</span><br/>嵌進你的 macOS 桌面</h1>
+
+    <p class="tagline" data-i18n="hero.tagline">
+      vim、htop、ssh、tmux、fzf 全部正常運作 — 因為這個 widget 把終端模擬交給
+      ttyd + xterm.js，你只需要拖移、縮放、鎖定。
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#install" data-i18n="hero.cta_install">▸ 開始安裝</a>
+      <a class="btn"         href="#features" data-i18n="hero.cta_features">看看功能</a>
+    </div>
+
+    <!-- mock terminal -->
+    <div class="term-mock">
+      <div class="term-bar"></div>
+      <div class="term-body" id="termBody"></div>
+      <div class="term-lock" title="Lock button">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="11" width="16" height="10" rx="2"/>
+          <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 01 核心功能區塊 ────────────────────────────────────────────────
+     8 張功能卡 grid，每張 icon + 標題 + 一段描述。卡片內容寫在 JS 的
+     FEATURES 字典（zh / en 兩版），改卡片就改那邊；新增卡片直接 append。
+     hover 會浮起 + 邊框轉 accent 色。 -->
+<section id="features">
+  <div class="wrap">
+    <h2><span class="num">01</span><span data-i18n="features.h">核心功能</span></h2>
+    <p class="lede" data-i18n="features.lede">不是把命令輸出抓回來貼到畫面 — 是把整個 xterm.js 真實終端嵌進桌面。</p>
+
+    <div class="features" id="featuresGrid"></div>
+  </div>
+</section>
+
+<!-- ─── 02 安裝區塊 + 03 客製化區塊 ────────────────────────────────────
+     上半 = 4 步驟編號流程（含 brew / cp / python3 install.py 三段 code）
+     中段 = 相依軟體 6 張卡（Übersicht / ttyd / Homebrew / Python /
+            macOS / GitHub），點擊跳官方頁面或 repo
+     下半 = 客製化 3 張卡，告訴使用者哪三個檔案可以改 -->
+<section id="install">
+  <div class="wrap">
+    <h2><span class="num">02</span><span data-i18n="install.h">安裝</span></h2>
+    <p class="lede" data-i18n="install.lede">五分鐘從零到桌面有個 widget。</p>
+
+    <!-- ─── 相依軟體 / Dependencies ────────────────────────────────────── -->
+    <!-- 此區用 cdn.simpleicons.org 抓 SVG logo（單檔約 1KB）；點擊各卡 -->
+    <!-- 直接前往對應官網／GitHub。要新增依賴就複製一張 .dep 卡並改連結。 -->
+    <h3 style="font-size:13px; font-family:var(--mono); color:var(--fg-mute);
+               text-transform:uppercase; letter-spacing:0.1em; margin:0 0 14px;"
+        data-i18n="install.deps_h">相依軟體</h3>
+    <div class="deps">
+      <a class="dep" href="https://tracesof.net/uebersicht/" target="_blank" rel="noopener">
+        <div class="dep-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               style="color:#a8a8b0">
+            <rect x="2" y="3" width="20" height="16" rx="2"/>
+            <path d="M2 7h20"/>
+            <circle cx="5" cy="5" r="0.7" fill="#ff5f56"/>
+            <circle cx="7.5" cy="5" r="0.7" fill="#ffbd2e"/>
+            <circle cx="10" cy="5" r="0.7" fill="#27c93f"/>
+          </svg>
+        </div>
+        <div class="dep-name">Übersicht</div>
+        <div class="dep-tag" data-i18n="deps.uebersicht">桌面 widget 框架</div>
+      </a>
+
+      <a class="dep" href="https://github.com/tsl0922/ttyd" target="_blank" rel="noopener">
+        <div class="dep-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#5fd7af" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <path d="M6 9l3 3-3 3"/>
+            <path d="M12 16h6"/>
+          </svg>
+        </div>
+        <div class="dep-name">ttyd</div>
+        <div class="dep-tag" data-i18n="deps.ttyd">終端機後端</div>
+      </a>
+
+      <a class="dep" href="https://brew.sh/" target="_blank" rel="noopener">
+        <div class="dep-logo">
+          <img src="https://cdn.simpleicons.org/homebrew/FBB040" alt="Homebrew" />
+        </div>
+        <div class="dep-name">Homebrew</div>
+        <div class="dep-tag" data-i18n="deps.brew">套件安裝</div>
+      </a>
+
+      <a class="dep" href="https://www.python.org/" target="_blank" rel="noopener">
+        <div class="dep-logo">
+          <img src="https://cdn.simpleicons.org/python/3776AB" alt="Python" />
+        </div>
+        <div class="dep-name">Python 3</div>
+        <div class="dep-tag" data-i18n="deps.python">install.py 引擎</div>
+      </a>
+
+    </div>
+
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3 data-i18n="install.s1_title">安裝相依工具</h3>
+          <p data-i18n="install.s1_body">Übersicht 是顯示框架，ttyd 是真正跑終端的引擎。</p>
+<pre><code>brew install --cask ubersicht
+brew install ttyd</code></pre>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3 data-i18n="install.s2_title">把 widget 放進 Übersicht</h3>
+          <p data-i18n="install.s2_body">整個資料夾複製過去：</p>
+<pre><code>cp -R terminal-widget.widget \
+   "$HOME/Library/Application Support/Übersicht/widgets/"</code></pre>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3 data-i18n="install.s3_title">跑互動安裝程式（推薦）</h3>
+          <p data-i18n="install.s3_body">會自動分配 port、設定招呼語、AUTORUN 指令，並可一次建立多個獨立實例。</p>
+<pre><code>cd "$HOME/Library/Application Support/Übersicht/widgets/terminal-widget.widget"
+python3 install.py</code></pre>
+          <p style="margin-top:14px;" data-i18n="install.s3_questions">互動流程會問你：</p>
+          <ul id="installQs"></ul>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <h3 data-i18n="install.s4_title">啟動</h3>
+          <p data-i18n-html="install.s4_body">Übersicht 選單列 → <strong>Refresh All Widgets</strong>。約半秒後會看到桌面浮現一個終端機，就完成了。</p>
+        </div>
+      </div>
+
+    </div>
+
+    <h2 style="margin-top:60px;"><span class="num">03</span><span data-i18n="custom.h">客製化</span></h2>
+    <p class="lede" data-i18n="custom.lede">三個檔案可以調，全部都有中文註解。</p>
+
+    <div class="features" id="customGrid"></div>
+  </div>
+</section>
+
+<!-- ─── 04 注意事項區塊 ────────────────────────────────────────────────
+     8 張帶 tag 的卡：SECURITY（紅）/ TIP（綠）/ INFO（藍）/ 其他（黃）
+     四種顏色由 CSS class .note.security / .note.tip / .note.info 控制。
+     內容在 JS 的 NOTES 字典，第一欄是 class、第二欄是 tag 文字。 -->
+<section id="notes">
+  <div class="wrap">
+    <h2><span class="num">04</span><span data-i18n="notes.h">注意事項</span></h2>
+    <p class="lede" data-i18n="notes.lede">事先知道這些可以省下不少 debug 時間。</p>
+
+    <div class="note-grid" id="notesGrid"></div>
+  </div>
+</section>
+
+<!-- ─── 05 Skill 區塊 ──────────────────────────────────────────────────
+     介紹同捆的 Claude Code skill「uebersicht-interactive-widget」。
+     對使用 Claude Code 的人來說，這個 skill 就是這份 widget 的維護
+     手冊 — 當你想再加功能、修 bug、或自己仿造一個類似的 widget，
+     用 Skill("uebersicht-interactive-widget") 直接把方法論載入 LLM。 -->
+<section id="skill">
+  <div class="wrap">
+    <h2><span class="num">05</span><span data-i18n="skill.h">調整 Widget 的 Skill</span></h2>
+    <p class="lede" data-i18n="skill.lede">
+      隨 widget 一起出貨的 Claude Code skill 檔，把整套架構、常見除錯陷阱、標準骨架封裝成一份可被 AI 載入的方法論。
+    </p>
+
+    <div class="skill-card">
+      <div class="skill-head">
+        <div class="skill-badge">⚡</div>
+        <div class="skill-meta">
+          <div class="skill-name">uebersicht-interactive-widget</div>
+          <div class="skill-tag" data-i18n="skill.tag">建構 Übersicht 互動式桌面 widget 的方法論 Skill</div>
+        </div>
+        <div class="skill-stamp">SKILL.md</div>
+      </div>
+
+      <p style="color:var(--fg-soft); font-size:14px; margin:0;" data-i18n="skill.intro">
+        這份 skill 把今天從零打造這個 widget 的整段經驗濃縮成一份結構化的指南。在 Claude Code session 內呼叫它，AI 就會帶著正確的心智模型來幫你修改 widget — 不會走我們已經踩過的彎路。
+      </p>
+
+      <h4 data-i18n="skill.invoke_h">如何呼叫</h4>
+<pre><code>Skill("uebersicht-interactive-widget")</code></pre>
+
+      <h4 data-i18n="skill.what_h">這份 Skill 教 AI 哪些事</h4>
+      <ul id="skillBullets"></ul>
+
+      <h4 data-i18n="skill.use_h">什麼時候請 AI 用它</h4>
+      <ul id="skillUseCases"></ul>
+
+      <h4 data-i18n="skill.path_h">本機檔案位置</h4>
+      <div class="skill-path">
+        ~/Documents/Agent-Skills-Library/uebersicht-interactive-widget/SKILL.md<br/>
+        <span style="color:var(--fg-mute);" data-i18n="skill.symlink">↳ 已 symlink 到 ~/.claude/skills/ 供 Claude Code 自動載入</span>
+      </div>
+
+      <div class="skill-actions">
+        <a class="btn primary" id="skillViewBtn" href="#" target="_blank" rel="noopener" data-i18n="skill.view">▸ 開啟 SKILL.md</a>
+        <a class="btn" href="https://docs.claude.com/en/docs/agents-and-tools/agent-skills" target="_blank" rel="noopener" data-i18n="skill.docs">Claude Skills 文件 ↗</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 06 授權區塊 ────────────────────────────────────────────────────
+     MIT badge + 連結到 ttyd / xterm.js（兩者也是 MIT）+ 免責聲明。
+     版權年份在 license.body 裡寫死，要更新直接改 DICT。 -->
+<section id="license">
+  <div class="wrap">
+    <h2><span class="num">06</span><span data-i18n="license.h">開源授權</span></h2>
+    <p class="lede" data-i18n="license.lede">本 widget 與所有依賴皆採 MIT 授權，可商用、可修改、可重新散佈。</p>
+
+    <div class="license">
+      <span class="badge">MIT LICENSE</span>
+      <div class="license-body">
+        <h3 data-i18n="license.title">自由使用</h3>
+        <p data-i18n-html="license.body">
+          Copyright © 2026 Scott Chen ｜
+          Terminal Widget for Übersicht ／
+          <a href="https://github.com/tsl0922/ttyd" target="_blank" rel="noopener">ttyd</a> ／
+          <a href="https://xtermjs.org" target="_blank" rel="noopener">xterm.js</a> 皆 MIT 授權。
+        </p>
+      </div>
+    </div>
+
+    <div style="margin-top:20px; font-size:13px; color:var(--fg-mute); line-height:1.7;">
+      <p data-i18n="license.disclaimer">
+        允許你做幾乎任何事 — 只需在散佈時保留原始版權聲明與 MIT 授權文字。
+        本軟體按「現況」提供，作者不對任何使用情境作擔保。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Footer ─────────────────────────────────────────────────────────
+     一行作者署名 + 一行技術 stack 標示。低調收尾，與整體配色一致。 -->
+<footer>
+  <div class="wrap">
+    <div data-i18n="footer.by">Built by Scott Chen · 2026</div>
+    <div class="stack">Übersicht · ttyd · xterm.js · zsh · localhost-only · MIT</div>
+  </div>
+</footer>
+
+<!-- ─── i18n 字典 + 動態渲染 ───────────────────────────────────────────
+     - DICT      ：靜態元素的中／英文字（用 data-i18n="key" 找對應）
+     - FEATURES  ：8 張功能卡的內容（icon, 標題, 描述）
+     - CUSTOM    ：3 張客製化卡的內容
+     - NOTES     ：8 張注意事項卡（class, tag, 標題, 內文）
+     - INSTALL_QS：互動安裝程式問題清單
+     - TERM_MOCK ：hero 終端機模擬畫面
+     新增／修改文字 → 動 DICT；新增卡片 → 動對應陣列。
+     語言切換邏輯：
+     1. 偵測 localStorage 上次選擇 → 沒有就讀 navigator.language
+     2. applyLang(lang) 走訪 [data-i18n] 元素填字
+     3. 重新 render 動態卡片區塊
+     4. 寫回 localStorage 給下次造訪用 -->
+<!-- ───────────────────────────────────────────────────────────────────── -->
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// 此 GitHub URL 是 placeholder — 換成你自己的 repo 即可（同時更新 nav 與
+// 「相依軟體」區塊裡的兩個 GitHub 連結）。設成空字串就把卡片隱藏起來。
+const GITHUB_URL = "https://github.com/ShiGaChenTW/terminal-widget-uebersicht";
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DICT = {
+  zh: {
+    "meta.title": "Terminal Widget for Übersicht — 桌面內嵌真正的終端機",
+    "meta.desc":  "把 vim、htop、ssh、tmux、fzf 直接嵌進 macOS 桌面的 Übersicht widget。底層 ttyd + xterm.js，前端拖移／縮放／鎖定／多實例。",
+
+    "nav.features": "功能", "nav.install": "安裝",
+    "nav.notes": "注意事項", "nav.skill": "Skill", "nav.license": "授權",
+
+    "skill.h": "調整 Widget 的 Skill",
+    "skill.lede": "隨 widget 一起出貨的 Claude Code skill 檔，把整套架構、常見除錯陷阱、標準骨架封裝成一份可被 AI 載入的方法論。",
+    "skill.tag": "建構 Übersicht 互動式桌面 widget 的方法論 Skill",
+    "skill.intro": "這份 skill 把今天從零打造這個 widget 的整段經驗濃縮成一份結構化的指南。在 Claude Code session 內呼叫它，AI 就會帶著正確的心智模型來幫你修改 widget — 不會走我們已經踩過的彎路。",
+    "skill.invoke_h": "如何呼叫",
+    "skill.what_h": "這份 Skill 教 AI 哪些事",
+    "skill.use_h": "什麼時候請 AI 用它",
+    "skill.path_h": "本機檔案位置",
+    "skill.symlink": "↳ 已 symlink 到 ~/.claude/skills/ 供 Claude Code 自動載入",
+    "skill.view": "▸ 開啟 SKILL.md",
+    "skill.docs": "Claude Skills 文件 ↗",
+
+    "hero.pill": "v1.0 · Übersicht widget · macOS",
+    "hero.title": '把<span class="accent">真正的終端機</span><br/>嵌進你的 macOS 桌面',
+    "hero.tagline": "vim、htop、ssh、tmux、fzf 全部正常運作 — 因為這個 widget 把終端模擬交給 ttyd + xterm.js，你只需要拖移、縮放、鎖定。",
+    "hero.cta_install": "▸ 開始安裝",
+    "hero.cta_features": "看看功能",
+
+    "features.h": "核心功能",
+    "features.lede": "不是把命令輸出抓回來貼到畫面 — 是把整個 xterm.js 真實終端嵌進桌面。",
+
+    "install.h": "安裝",
+    "install.lede": "五分鐘從零到桌面有個 widget。",
+    "install.s1_title": "安裝相依工具",
+    "install.s1_body": "Übersicht 是顯示框架，ttyd 是真正跑終端的引擎。",
+    "install.s2_title": "把 widget 放進 Übersicht",
+    "install.s2_body": "整個資料夾複製過去：",
+    "install.s3_title": "跑互動安裝程式（推薦）",
+    "install.s3_body": "會自動分配 port、設定招呼語、AUTORUN 指令，並可一次建立多個獨立實例。",
+    "install.s3_questions": "互動流程會問你：",
+    "install.s4_title": "啟動",
+    "install.s4_body": "Übersicht 選單列 → <strong>Refresh All Widgets</strong>。約半秒後會看到桌面浮現一個終端機，就完成了。",
+
+    "custom.h": "客製化",
+    "custom.lede": "三個檔案可以調，全部都有中文註解。",
+
+    "notes.h": "注意事項",
+    "notes.lede": "事先知道這些可以省下不少 debug 時間。",
+
+    "license.h": "開源授權",
+    "license.lede": "本 widget 與所有依賴皆採 MIT 授權，可商用、可修改、可重新散佈。",
+    "license.title": "自由使用",
+    "license.body": 'Copyright © 2026 Scott Chen ｜ Terminal Widget for Übersicht ／ <a href="https://github.com/tsl0922/ttyd" target="_blank" rel="noopener">ttyd</a> ／ <a href="https://xtermjs.org" target="_blank" rel="noopener">xterm.js</a> 皆 MIT 授權。',
+    "license.disclaimer": "允許你做幾乎任何事 — 只需在散佈時保留原始版權聲明與 MIT 授權文字。本軟體按「現況」提供，作者不對任何使用情境作擔保。",
+
+    "footer.by": "Built by Scott Chen · 2026",
+
+    "install.deps_h": "相依軟體",
+    "deps.uebersicht": "桌面 widget 框架",
+    "deps.ttyd":       "終端機後端",
+    "deps.brew":       "套件安裝",
+    "deps.python":     "install.py 引擎",
+    "deps.macos":      "執行平台",
+    "deps.github":     "原始碼",
+  },
+  en: {
+    "meta.title": "Terminal Widget for Übersicht — A real terminal on your desktop",
+    "meta.desc":  "An Übersicht widget that embeds a real terminal (vim, htop, ssh, tmux, fzf) on your macOS desktop. Powered by ttyd + xterm.js — drag, resize, lock, multi-instance.",
+
+    "nav.features": "Features", "nav.install": "Install",
+    "nav.notes": "Notes", "nav.skill": "Skill", "nav.license": "License",
+
+    "skill.h": "The companion Claude Skill",
+    "skill.lede": "A Claude Code skill ships alongside the widget — a structured methodology that an AI can load and use to safely modify, extend, or rebuild this widget.",
+    "skill.tag": "Methodology skill for building interactive Übersicht widgets",
+    "skill.intro": "This skill compresses the entire process of building this widget — including every dead end — into a structured guide. Invoke it inside a Claude Code session and the AI gets the right mental model from the start, skipping all the wrong turns.",
+    "skill.invoke_h": "How to invoke",
+    "skill.what_h": "What this Skill teaches the AI",
+    "skill.use_h": "When to ask the AI to use it",
+    "skill.path_h": "Local file location",
+    "skill.symlink": "↳ symlinked into ~/.claude/skills/ for Claude Code auto-loading",
+    "skill.view": "▸ Open SKILL.md",
+    "skill.docs": "Claude Skills docs ↗",
+
+    "hero.pill": "v1.0 · Übersicht widget · macOS",
+    "hero.title": 'A <span class="accent">real terminal</span><br/>embedded on your macOS desktop',
+    "hero.tagline": "vim, htop, ssh, tmux, fzf — all just work. The widget delegates terminal emulation to ttyd + xterm.js, so you only have to drag, resize, and lock.",
+    "hero.cta_install": "▸ Get started",
+    "hero.cta_features": "See features",
+
+    "features.h": "Core features",
+    "features.lede": "Not stdout scraping — a full xterm.js terminal embedded on your desktop.",
+
+    "install.h": "Install",
+    "install.lede": "From zero to a desktop terminal in five minutes.",
+    "install.s1_title": "Install dependencies",
+    "install.s1_body": "Übersicht is the display framework, ttyd is the actual terminal engine.",
+    "install.s2_title": "Drop the widget into Übersicht",
+    "install.s2_body": "Copy the folder over:",
+    "install.s3_title": "Run the interactive installer (recommended)",
+    "install.s3_body": "Auto-allocates ports, sets greetings and AUTORUN commands, and can create multiple independent instances in one shot.",
+    "install.s3_questions": "The installer asks you:",
+    "install.s4_title": "Activate",
+    "install.s4_body": "Übersicht menu → <strong>Refresh All Widgets</strong>. A terminal appears on your desktop in about half a second. Done.",
+
+    "custom.h": "Customisation",
+    "custom.lede": "Three files to tweak — all have inline comments.",
+
+    "notes.h": "Notes & caveats",
+    "notes.lede": "Knowing these in advance saves a lot of debugging time.",
+
+    "license.h": "Open source",
+    "license.lede": "This widget and all its dependencies are MIT-licensed. Free for commercial use, modification, and redistribution.",
+    "license.title": "Free to use",
+    "license.body": 'Copyright © 2026 Scott Chen · Terminal Widget for Übersicht / <a href="https://github.com/tsl0922/ttyd" target="_blank" rel="noopener">ttyd</a> / <a href="https://xtermjs.org" target="_blank" rel="noopener">xterm.js</a> — all MIT.',
+    "license.disclaimer": "You can do almost anything with it — just keep the copyright notice and MIT license text when redistributing. The software is provided AS IS, with no warranty.",
+
+    "footer.by": "Built by Scott Chen · 2026",
+
+    "install.deps_h": "Dependencies",
+    "deps.uebersicht": "Desktop widget framework",
+    "deps.ttyd":       "Terminal backend",
+    "deps.brew":       "Package manager",
+    "deps.python":     "install.py engine",
+    "deps.macos":      "Host platform",
+    "deps.github":     "Source code",
+  },
+};
+
+// ── Cards content (translated) ────────────────────────────────────────
+const FEATURES = {
+  zh: [
+    ["⌘", "完整互動式 shell", "vim、htop、ssh、tmux、fzf、less、watch — 任何需要 alt-screen 與 ANSI 控制碼的程式都正常顯示。"],
+    ["✦", "p10k / Nerd Font 完美渲染", "Powerlevel10k、oh-my-zsh、所有 Nerd Font 圖示都正確顯示，跟你平常終端機一模一樣。"],
+    ["↔", "拖移 + 縮放", "頂端 8px 拖移條、右下縮放角。GPU 合成 + rAF 合併事件，移動順暢無延遲。"],
+    ["⌧", "記憶位置與大小", "用 localStorage 自動儲存，重啟 Übersicht 或 Mac 重開機都記得上次的擺放位置與尺寸。"],
+    ["🔒", "一鍵鎖定", "左下小鎖頭，鎖上後拖移、縮放、鍵盤輸入全部停用 — 不會誤觸把終端機推到螢幕外。"],
+    ["⊞", "多份獨立實例", "各自 port、各自 .zshrc、各自記憶 — 一個工作用、一個側專案、一個監控用，互不干擾。"],
+    ["⚡", "啟動自動執行指令", "WIDGET_AUTORUN 設定點，每次 widget 啟動跑一次。例：<code>tmux attach</code>、<code>claude</code>、<code>cd 專案</code>。"],
+    ["🛡", "localhost-only", "ttyd 只綁 127.0.0.1，外網絕對碰不到。內建中文版 README 與互動安裝程式。"],
+  ],
+  en: [
+    ["⌘", "Fully interactive shell", "vim, htop, ssh, tmux, fzf, less, watch — anything that uses alt-screen or ANSI control codes renders correctly."],
+    ["✦", "Perfect p10k / Nerd Font", "Powerlevel10k, oh-my-zsh, every Nerd Font glyph displays exactly like in your regular terminal."],
+    ["↔", "Drag + resize", "8px drag strip on top, resize handle bottom-right. GPU compositing + rAF coalescing for buttery-smooth motion."],
+    ["⌧", "Position & size memory", "Auto-saved to localStorage. Survives Übersicht refresh and full Mac reboot."],
+    ["🔒", "One-click lock", "Bottom-left lock icon. When locked: drag, resize, and keyboard input are all disabled — no accidental nudges."],
+    ["⊞", "Multiple independent instances", "Each with its own port, .zshrc, and memory. One for work, one for side-projects, one for monitoring — no interference."],
+    ["⚡", "Auto-run on launch", "Set WIDGET_AUTORUN once; runs every time the widget starts. Examples: <code>tmux attach</code>, <code>claude</code>, <code>cd project</code>."],
+    ["🛡", "localhost-only", "ttyd binds to 127.0.0.1 only — never reachable from the network. Ships with both English & Chinese READMEs and an interactive installer."],
+  ],
+};
+
+const CUSTOM = {
+  zh: [
+    ["⚙", "index.jsx", "頂部兩個常數：<code>TTYD_PORT</code>（多開時要不同）、<code>ZDOTDIR</code>（自訂 zsh 設定資料夾）。"],
+    ["⚙", "zsh/.zshrc", "三大區塊：PROMPT 樣式、招呼語文字、<code>WIDGET_AUTORUN</code> 啟動指令。改完 <code>pkill -f ttyd</code> 即可生效。"],
+    ["⚙", "bridge-tick.sh", "ttyd 啟動參數（字型、字級、主題顏色、游標樣式）。完整選項參 xterm.js 文件。"],
+  ],
+  en: [
+    ["⚙", "index.jsx", "Two top-level constants: <code>TTYD_PORT</code> (must be unique per instance) and <code>ZDOTDIR</code> (custom zsh config folder)."],
+    ["⚙", "zsh/.zshrc", "Three sections: PROMPT style, greeting line, <code>WIDGET_AUTORUN</code>. Edit, then <code>pkill -f ttyd</code> to reload."],
+    ["⚙", "bridge-tick.sh", "ttyd launch flags (font, size, theme, cursor). See xterm.js docs for the full option list."],
+  ],
+};
+
+const NOTES = {
+  zh: [
+    ["security", "SECURITY", "localhost 不需要認證", "ttyd 只綁 127.0.0.1，但同一台 Mac 上其他帳號可以連 — 不過他們本來也能用你的帳號開 shell，所以不算新風險。多人共用 Mac 才需要在 <code>bridge-tick.sh</code> 加 <code>--credential</code>。"],
+    ["", "PORT", "多開時 port 必須不同", "每個 widget 資料夾的 <code>TTYD_PORT</code> 要獨特（7681、7682、7683…），否則會搶同一個 ttyd 程式，輸出與輸入互相干擾。<code>install.py</code> 會自動偵測。"],
+    ["", "PERFORMANCE", "太多 widget 會吃記憶體", "每個 widget = 一個 ttyd + 一個 zsh + 一個 WebKit iframe，每份大約 30-60 MB。建議同時不超過 4 個。"],
+    ["", "RC FILES", "內建 zsh 不載入你的 ~/.zshrc", "內建 <code>zsh/.zshrc</code> 是極簡版，所以 alias、PATH、p10k 都沒帶。想要完整環境就把 ZDOTDIR 指到你常用的 zsh 設定資料夾。"],
+    ["tip", "TIP", "改了 zshrc 沒反應？", "ttyd 把 zsh session 留著重用。執行 <code>pkill -f 'ttyd -p 7681'</code> 後下一次 widget poll 會自動重啟，新 .zshrc 才會被讀進來。"],
+    ["tip", "TIP", "重置 widget 位置", "右鍵 widget → Web Inspector → Console，跑 <code>localStorage.removeItem('terminal-widget:7681')</code>，再 Refresh All Widgets 就會回到預設位置。"],
+    ["info", "LOG", "遇到問題先看 log", "每個 widget 的 ttyd log 在 <code>/tmp/terminal-widget-ttyd-&lt;port&gt;.log</code>。port 衝突、ttyd 找不到、zsh 噴錯 — 答案幾乎都在這裡。"],
+    ["info", "FONT", "p10k 圖示變方框？", "系統沒裝 Nerd Font。執行 <code>brew install font-jetbrains-mono-nerd-font</code> 即可，<code>bridge-tick.sh</code> 已經先指定好字型名稱。"],
+  ],
+  en: [
+    ["security", "SECURITY", "Localhost has no auth", "ttyd binds to 127.0.0.1, but other accounts on the same Mac can connect — though they could already open a shell as your user, so it's not a new risk. For shared Macs add <code>--credential</code> to <code>bridge-tick.sh</code>."],
+    ["", "PORT", "Each instance needs a unique port", "Every widget folder's <code>TTYD_PORT</code> must differ (7681, 7682, 7683…) — otherwise they fight over the same ttyd, mixing input and output. <code>install.py</code> auto-detects this."],
+    ["", "PERFORMANCE", "Too many widgets eat RAM", "Each widget = one ttyd + one zsh + one WebKit iframe, ~30–60 MB per instance. Keep it under 4 at a time."],
+    ["", "RC FILES", "Bundled zsh skips your ~/.zshrc", "The bundled <code>zsh/.zshrc</code> is minimal — no aliases, PATH tweaks, or p10k. Point ZDOTDIR at your real zsh config folder if you want everything."],
+    ["tip", "TIP", "Changed zshrc but nothing happens?", "ttyd reuses the zsh session. Run <code>pkill -f 'ttyd -p 7681'</code> and the next widget poll will respawn it with the new .zshrc."],
+    ["tip", "TIP", "Reset widget position", "Right-click widget → Web Inspector → Console, run <code>localStorage.removeItem('terminal-widget:7681')</code>, then Refresh All Widgets to return to defaults."],
+    ["info", "LOG", "Check the log first when stuck", "Each widget's ttyd log lives at <code>/tmp/terminal-widget-ttyd-&lt;port&gt;.log</code>. Port conflicts, missing ttyd, zsh errors — the answer is almost always here."],
+    ["info", "FONT", "p10k glyphs show as boxes?", "No Nerd Font installed. Run <code>brew install font-jetbrains-mono-nerd-font</code> — <code>bridge-tick.sh</code> already references it by name."],
+  ],
+};
+
+// Skill 區塊的兩組 bullets（左欄：Skill 內容；右欄：使用時機）
+const SKILL_WHAT = {
+  zh: [
+    "Übersicht 的真實渲染模型（不是終端機，是 WebKit + command poll）",
+    "「iframe-a-real-app」核心模式 — 不要硬幹終端模擬",
+    "標準骨架：可直接複製貼上的 <code>index.jsx</code> + <code>bridge-tick.sh</code>",
+    "5 大除錯陷阱：500 / out of pty devices / event 不是字串 / CORS preflight / 亂碼",
+    "多實例設定（port、ZDOTDIR、autorun）的正確做法",
+    "預設安全：localhost-only binding、port 衝突防護、lockfile spawn 守則",
+  ],
+  en: [
+    "Übersicht's real render model (it's a WebKit page + command poll, not a terminal)",
+    "The core <em>iframe-a-real-app</em> pattern — don't reinvent terminal emulation",
+    "Standard skeleton: copy-pasteable <code>index.jsx</code> + <code>bridge-tick.sh</code>",
+    "5 common debugging traps: 500 / out of pty devices / event is not a string / CORS preflight / garbled output",
+    "How to set up multiple isolated instances (port, ZDOTDIR, autorun)",
+    "Safe defaults: localhost-only binding, port conflict guards, lockfile spawn discipline",
+  ],
+};
+const SKILL_USE = {
+  zh: [
+    "想加新功能（例：第二個輸入欄、新的鎖定模式、跨 widget 同步）",
+    "想自己仿造類似的 widget（log 監控、REPL、DB 探查器）",
+    "改 widget 時 AI 開始建議「自己解析 ANSI」之類的彎路 — 用這個 skill 把它導正",
+    "Code review 自己寫的 Übersicht widget，找出潛在 race / CORS / 安全漏洞",
+  ],
+  en: [
+    "Adding new features (a second input field, new lock mode, cross-widget sync)",
+    "Building a similar widget from scratch (log tailer, REPL, DB explorer)",
+    "When the AI starts suggesting wrong turns like \"let's parse ANSI ourselves\" — use this skill to course-correct",
+    "Code-reviewing your own Übersicht widgets for race conditions, CORS issues, security holes",
+  ],
+};
+
+const INSTALL_QS = {
+  zh: ["要建立幾個 widget", "每個的 port（自動帶入未被佔用的）", "是否使用獨立的 .zshrc 資料夾", "每個 widget 的招呼語文字", "每個 widget 啟動時要自動執行的指令"],
+  en: ["how many widgets to create", "the port for each (auto-suggested from free ones)", "whether to use a separate .zshrc folder", "the greeting text for each widget", "the command to auto-run each time the widget starts"],
+};
+
+const TERM_MOCK = {
+  zh: `<span class="term-greet">Hi Scott — terminal ready.</span>
+
+<span class="term-prompt-dir">~</span> <span class="term-prompt-shell">[zsh]</span> <span class="term-prompt-arrow">❯</span> <span class="term-cmd">cd Documents/Coding-Project</span>
+<span class="term-prompt-dir">Documents/Coding-Project</span> <span class="term-prompt-shell">[zsh]</span> <span class="term-prompt-arrow">❯</span> <span class="term-cmd">vim README.md</span>
+<span class="term-out">— vim 開啟，alt-screen 與語法上色完整 —</span>
+<span class="term-prompt-dir">Documents/Coding-Project</span> <span class="term-prompt-shell">[zsh]</span> <span class="term-prompt-arrow">❯</span> <span class="term-cmd">htop</span><span class="term-cursor"></span>`,
+  en: `<span class="term-greet">Hi Scott — terminal ready.</span>
+
+<span class="term-prompt-dir">~</span> <span class="term-prompt-shell">[zsh]</span> <span class="term-prompt-arrow">❯</span> <span class="term-cmd">cd Documents/Coding-Project</span>
+<span class="term-prompt-dir">Documents/Coding-Project</span> <span class="term-prompt-shell">[zsh]</span> <span class="term-prompt-arrow">❯</span> <span class="term-cmd">vim README.md</span>
+<span class="term-out">— vim opens, full alt-screen + syntax highlighting —</span>
+<span class="term-prompt-dir">Documents/Coding-Project</span> <span class="term-prompt-shell">[zsh]</span> <span class="term-prompt-arrow">❯</span> <span class="term-cmd">htop</span><span class="term-cursor"></span>`,
+};
+
+// ── Render helpers ────────────────────────────────────────────────────
+const renderFeatures = (lang) => {
+  document.getElementById("featuresGrid").innerHTML = FEATURES[lang]
+    .map(([icon, title, desc]) =>
+      `<div class="feat"><div class="icon">${icon}</div><h3>${title}</h3><p>${desc}</p></div>`
+    ).join("");
+};
+
+const renderCustom = (lang) => {
+  document.getElementById("customGrid").innerHTML = CUSTOM[lang]
+    .map(([icon, title, desc]) =>
+      `<div class="feat"><div class="icon">${icon}</div><h3>${title}</h3><p>${desc}</p></div>`
+    ).join("");
+};
+
+const renderNotes = (lang) => {
+  document.getElementById("notesGrid").innerHTML = NOTES[lang]
+    .map(([cls, tag, title, body]) =>
+      `<div class="note ${cls}"><span class="tag">${tag}</span><h3>${title}</h3><p>${body}</p></div>`
+    ).join("");
+};
+
+const renderInstallQs = (lang) => {
+  document.getElementById("installQs").innerHTML = INSTALL_QS[lang]
+    .map(q => `<li>${q}</li>`).join("");
+};
+
+const renderTermMock = (lang) => {
+  document.getElementById("termBody").innerHTML = TERM_MOCK[lang];
+};
+
+const renderSkill = (lang) => {
+  const what = document.getElementById("skillBullets");
+  const use  = document.getElementById("skillUseCases");
+  if (what) what.innerHTML = SKILL_WHAT[lang].map(s => `<li>${s}</li>`).join("");
+  if (use)  use.innerHTML  = SKILL_USE[lang].map(s => `<li>${s}</li>`).join("");
+};
+
+// ── Apply language ────────────────────────────────────────────────────
+const LS_LANG = "terminal-widget-landing-lang";
+
+const applyLang = (lang) => {
+  const dict = DICT[lang] || DICT.zh;
+
+  // <html lang> attribute
+  document.documentElement.setAttribute("lang", lang === "en" ? "en" : "zh-Hant");
+
+  // Replace text content
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.getAttribute("data-i18n");
+    if (!(key in dict)) return;
+    const attr = el.getAttribute("data-i18n-attr");
+    if (attr) el.setAttribute(attr, dict[key]);
+    else el.textContent = dict[key];
+  });
+
+  // Replace HTML content (for elements with inline tags)
+  document.querySelectorAll("[data-i18n-html]").forEach(el => {
+    const key = el.getAttribute("data-i18n-html");
+    if (key in dict) el.innerHTML = dict[key];
+  });
+
+  // Update title separately (it has data-i18n above; covered by loop)
+
+  // Toggle button active state
+  document.querySelectorAll(".lang-toggle button").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.lang === lang);
+  });
+
+  // Re-render dynamic content
+  renderFeatures(lang);
+  renderCustom(lang);
+  renderNotes(lang);
+  renderInstallQs(lang);
+  renderTermMock(lang);
+  renderSkill(lang);
+
+  // Persist
+  try { localStorage.setItem(LS_LANG, lang); } catch {}
+};
+
+// ── Init ──────────────────────────────────────────────────────────────
+const detectInitialLang = () => {
+  try {
+    const saved = localStorage.getItem(LS_LANG);
+    if (saved === "en" || saved === "zh") return saved;
+  } catch {}
+  // Browser preference
+  const nav = (navigator.language || "").toLowerCase();
+  return nav.startsWith("zh") ? "zh" : "en";
+};
+
+document.querySelectorAll(".lang-toggle button").forEach(btn => {
+  btn.addEventListener("click", () => applyLang(btn.dataset.lang));
+});
+
+// ── 把 GITHUB_URL 套到 nav 列的 GitHub icon 連結 ────────────────────────
+(() => {
+  const ghLink = document.getElementById("ghLink");
+  if (!GITHUB_URL) {
+    if (ghLink) ghLink.style.display = "none";
+    return;
+  }
+  if (ghLink) ghLink.href = GITHUB_URL;
+})();
+
+// ── Skill 檔案位置：用相對路徑 + 絕對路徑兩種 fallback ───────────────────
+//   - 同站佈署時優先用相對連結（會直接顯示 .md 原始碼）
+//   - 在使用者本機檔案系統可改成 file:// 路徑
+//   修改下面的 SKILL_VIEW_URL 即可換成 GitHub raw、Pages、或本機 path
+const SKILL_VIEW_URL =
+  "https://raw.githubusercontent.com/ShiGaChenTW/terminal-widget-uebersicht/main/SKILL.md";
+(() => {
+  const btn = document.getElementById("skillViewBtn");
+  if (btn) btn.href = SKILL_VIEW_URL;
+})();
+
+applyLang(detectInitialLang());
+</script>
+
+</body>
+</html>

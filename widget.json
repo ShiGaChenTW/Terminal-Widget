@@ -1,0 +1,8 @@
+{
+    "name": "Terminal Widget for Übersicht",
+    "description": "An interactive terminal widget for Übersicht with persistent display and fixed size. Allows direct command input and displays output in real-time.",
+    "author": "Scott Chen",
+    "version": "1.0.0",
+    "platform": "darwin",
+    "category": "utility"
+}
