@@ -12,3 +12,8 @@ __pycache__/
 # Local runtime artifacts (logs, lock dirs)
 *.log
 .lock
+
+# Claude Code 本機衍生（不入庫）
+.claude/worktrees/
+.claude/settings.local.json
+.claude/.DS_Store
