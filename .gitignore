@@ -17,3 +17,7 @@ __pycache__/
 .claude/worktrees/
 .claude/settings.local.json
 .claude/.DS_Store
+
+# Bootstrap 個人 override (不入庫)
+scripts/bootstrap.local.sh
+scripts/teardown.local.sh
