@@ -1,0 +1,78 @@
+<!doctype html>
+<!--
+  pi-console.html — 框架無關版的 Path B 整合參考（與 PiConsole.jsx 同邏輯）
+  用途：不是 React 的殼、或想先快速驗證時，直接開這個檔即可看到內嵌的 Pi web UI。
+
+  前置（一次性）：
+    npm install -g @jmfederico/pi-web      # Node 22+
+    pi-web install && pi-web doctor         # 服務於 http://127.0.0.1:8504
+
+  可用 querystring 覆寫：pi-console.html?host=127.0.0.1&port=8504
+-->
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pi console</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #141418; }
+      #wrap { position: fixed; inset: 0; }
+      iframe { width: 100%; height: 100%; border: none; background: #141418; }
+      #status {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 8px;
+        color: #d4d4d4; font: 13px/1.5 -apple-system, Menlo, monospace;
+      }
+      #status .dim { opacity: 0.6; }
+      code { color: #5fd7af; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap"></div>
+    <div id="status">connecting to Pi…</div>
+    <script>
+      const q = new URLSearchParams(location.search);
+      const HOST = q.get("host") || "127.0.0.1";
+      const PORT = q.get("port") || "8504";
+      const URL_ = `http://${HOST}:${PORT}/`;
+      const POLL_MS = 1500;
+
+      const wrap = document.getElementById("wrap");
+      const status = document.getElementById("status");
+      let mounted = false;
+
+      function mount() {
+        if (mounted) return;
+        mounted = true;
+        status.style.display = "none";
+        const f = document.createElement("iframe");
+        f.title = "Pi console";
+        f.src = URL_;
+        wrap.appendChild(f);
+      }
+
+      function down() {
+        if (!mounted) return;
+        mounted = false;
+        wrap.innerHTML = "";
+        status.style.display = "flex";
+      }
+
+      async function probe() {
+        try {
+          // 只判斷可達性；no-cors 避開跨來源限制（連得上 resolve、連不上 reject）。
+          await fetch(URL_, { mode: "no-cors", cache: "no-store" });
+          mount();
+        } catch (_e) {
+          down();
+          status.innerHTML =
+            'Pi web UI 連不上<div class="dim">' + URL_ + "</div>" +
+            '<div class="dim">請先執行 <code>pi-web install</code> / <code>pi-web restart</code></div>';
+        }
+      }
+
+      probe();
+      setInterval(probe, POLL_MS);
+    </script>
+  </body>
+</html>
