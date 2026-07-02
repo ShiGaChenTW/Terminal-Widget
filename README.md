@@ -108,14 +108,47 @@ on the desktop.
 
 ---
 
+## Agent console (Pi) — experimental
+
+The same iframe-a-real-app pattern can host an **AI coding agent** instead of a
+plain shell, pointed at a knowledge base (e.g. an Obsidian "second brain"
+vault). This started as a feasibility study for replacing a hand-written
+command/log panel with an agent-backed console; see
+[`docs/pi-secondbrain-console-feasibility.md`](docs/pi-secondbrain-console-feasibility.md).
+
+Two backends ship as PoCs (the `install.py` backend picker wires either one):
+
+| Backend | What runs | Script | Needs | Notes |
+|---|---|---|---|---|
+| `zsh`   | real shell (default) | `bridge-tick.sh` | ttyd | unchanged original |
+| `pi`    | [Pi](https://github.com/earendil-works/pi) agent TUI in ttyd | `agent-bridge-tick.sh` | ttyd + `pi` | Path A — [docs](docs/poc-pi-console.md) |
+| `pi-web`| Pi web UI, no ttyd | `pi-web-tick.sh` | `pi-web` | Path B — [docs](docs/poc-pi-web-console.md) |
+
+Quick try (Path A, read-only first run):
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+export ANTHROPIC_API_KEY=...
+./agent-bridge-tick.sh 7690 "/path/to/your/vault"   # open http://127.0.0.1:7690
+```
+
+Or let the installer set it up: `python3 install.py` → pick backend **2** (pi) or
+**3** (pi-web) per instance. Pi is MIT-licensed and cross-platform (incl. Windows
+via the `pi-web` path); the `zsh`/`pi` ttyd backends are macOS/Unix.
+
+---
+
 ## File layout
 
 ```
 terminal-widget.widget/
-├── index.jsx          ← Übersicht widget: iframe + drag/resize + state
-├── bridge-tick.sh     ← per-poll launcher: ensures ttyd is running
-├── install.py         ← interactive installer / instance cloner
-├── widget.json        ← Übersicht metadata
+├── index.jsx             ← Übersicht widget: iframe + drag/resize + state
+├── bridge-tick.sh        ← per-poll launcher: ensures ttyd (zsh) is running
+├── agent-bridge-tick.sh  ← Path A: ttyd running the Pi agent TUI
+├── pi-web-tick.sh        ← Path B: health probe; widget iframes Pi web UI
+├── install.py            ← interactive installer / instance cloner (backend picker)
+├── widget.json           ← Übersicht metadata
+├── docs/                 ← feasibility report + PoC guides
 └── README.md
 ```
 
