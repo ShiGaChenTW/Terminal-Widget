@@ -2,6 +2,11 @@
 
 從雲端 session 回到 Mac 後，照這份把 `PiConsole` 整合進 Commander Center 的 console 標籤頁。
 
+> **狀態（2026-07-03）**：第 1～2 步已在 Scott 的 Mac 完成並驗證
+> （pi-web 1.202606.7，web + sessiond 均 available，服務於 127.0.0.1:8504）。
+> 剩餘工作見 `docs/handoff-commander-console.md`，交本地 agent 執行。
+> 安裝過程踩過的坑見文末「Troubleshooting（實戰記錄）」。
+
 ---
 
 ## 0. 前置
@@ -121,3 +126,62 @@ web UI，預設 http://127.0.0.1:8504，用 no-cors 探測可達性後才 iframe
 前置我已完成：pi-web 已安裝並在 127.0.0.1:8504 跑、vault 已在 ~/.config/pi-web/config.json 設好。
 本專案技術棧：<Electron / Tauri / 純 web，React？>。console 標籤頁大概在 <檔案或資料夾，如果知道>。
 ```
+
+---
+
+## Troubleshooting（實戰記錄，2026-07-03 於 Scott 的 MacBook Air 實際踩過）
+
+pi-web 安裝到能跑，實際遇到 4 個坑。依序排查：
+
+### 1. `node-pty spawn-helper` 沒有執行權限（上游打包 bug）
+
+**症狀**：`pi-web doctor` 顯示
+`✗ node-pty macOS spawn-helper executable ... exists but is not executable`
+→ sessiond 起不來（開不了 PTY）。
+
+**修法**（doctor 會印出確切路徑，照它 chmod）：
+```bash
+chmod +x '/opt/homebrew/lib/node_modules/@jmfederico/pi-web/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper'
+```
+> 每次重裝 pi-web 都可能要再做一次（node-pty#850 / pi-web#4 已知問題）。
+
+### 2. 裝在 nvm 底下 → launchd 背景服務找不到執行檔
+
+**症狀**：`pi-web logs` 一直印
+`zsh:1: command not found: pi-web-sessiond` / `pi-web-server`。
+原因：pi-web 被 npm 裝到 `~/.nvm/versions/node/<ver>/bin/`，但 LaunchAgent 用的
+`zsh -lc` PATH 沒有 nvm（nvm 只在互動 shell 載入，甚至是 lazy-load 函式）。
+
+**修法**：改用 **Homebrew 的 node（釘 22）** 全域安裝，落在 `/opt/homebrew/bin`（服務找得到）：
+```bash
+/Users/<you>/.nvm/versions/node/<ver>/bin/npm uninstall -g @jmfederico/pi-web  # 移除 nvm 那份
+/opt/homebrew/bin/npm install -g @jmfederico/pi-web                            # 用 brew npm 裝
+pi-web install
+```
+> 檢查是否重複安裝：`which -a pi-web pi-web-server pi-web-sessiond`，應只剩 `/opt/homebrew/bin/*`。
+
+### 3. 重裝後 spawn-helper 權限要再修一次
+
+brew 新裝的那份 node-pty 是全新檔案，坑 1 會重現。照 doctor 印的新路徑再 `chmod +x`。
+
+### 4. 反覆 `pi-web restart` 把 sessiond 的 launchd job 弄掉了
+
+**症狀**：`pi-web status` 兩個服務輪流一個 running 一個掛；
+`launchctl print gui/501/com.pi-web.sessiond` 回
+`Could not find service "com.pi-web.sessiond"` ← job 根本不在 launchd 裡。
+
+**修法**：不要再 restart，改用 **`pi-web install` 重新註冊**（會把缺的 job bootstrap 回去）：
+```bash
+pi-web install
+sleep 20
+pi-web status        # 兩個都應 running
+```
+
+### 最終驗證（全部修完長這樣）
+```bash
+curl -s http://127.0.0.1:8504/api/pi-web/version
+# JSON 內 "web" 與 "sessiond" 都要 "available": true
+```
+
+**經驗法則**：卡住時先 `pi-web doctor` + `tail ~/.pi-web/logs/{web,sessiond}.log`；
+服務不見用 `pi-web install` 重註冊，而不是狂 `restart`（launchd 會節流、還可能弄掉 job）。
