@@ -159,6 +159,7 @@ def first_free_port(start: int = 7681) -> int:
 PORT_RE = re.compile(r"const\s+TTYD_PORT\s*=\s*\d+\s*;")
 ZDOT_RE = re.compile(r'const\s+ZDOTDIR\s*=\s*"[^"]*"\s*;')
 WDIR_RE = re.compile(r'const\s+WIDGET_DIR\s*=\s*\n?\s*"[^"]*"\s*;')
+COMMAND_RE = re.compile(r"export\s+const\s+command\s*=\s*`[^`]*`\s*;")
 GREET_RE = re.compile(r'^print -P "[^"]*"\s*$', re.MULTILINE)
 AUTORUN_RE = re.compile(r'^WIDGET_AUTORUN="[^"]*"\s*$', re.MULTILINE)
 DEFAULT_GREETING = "Hi Scott — terminal ready."
@@ -180,6 +181,59 @@ def patch_index(widget_dir: Path, port: int, zdotdir: str) -> None:
     )
 
     f.write_text(text, encoding="utf-8")
+
+
+def patch_command(widget_dir: Path, backend: str, vault: str, writable: bool) -> None:
+    """Rewrite index.jsx's `export const command = …` line for the chosen backend.
+
+    backend:
+      "zsh"    → bridge-tick.sh PORT ZDOTDIR         (original desktop terminal)
+      "pi"     → agent-bridge-tick.sh PORT VAULT     (Path A: ttyd wraps `pi` TUI)
+      "pi-web" → pi-web-tick.sh PORT                 (Path B: iframe Pi web UI)
+
+    ${WIDGET_DIR}/${TTYD_PORT}/${ZDOTDIR} stay as JS template refs so the rest
+    of index.jsx (which reads those consts) keeps working untouched.
+    """
+    f = widget_dir / "index.jsx"
+    text = f.read_text(encoding="utf-8")
+
+    if backend == "pi":
+        # PI_FLAGS='' lets the agent write/edit/bash; omitted → script default
+        # (read-only: --tools read,grep,find,ls).
+        prefix = "PI_FLAGS='' " if writable else ""
+        vault_arg = f" '{vault}'" if vault else ""
+        cmd = (
+            "export const command = "
+            f"`{prefix}'${{WIDGET_DIR}}/agent-bridge-tick.sh' ${{TTYD_PORT}}{vault_arg}`;"
+        )
+    elif backend == "pi-web":
+        cmd = "export const command = `'${WIDGET_DIR}/pi-web-tick.sh' ${TTYD_PORT}`;"
+    else:  # zsh (unchanged from the shipped default)
+        cmd = "export const command = `'${WIDGET_DIR}/bridge-tick.sh' ${TTYD_PORT} '${ZDOTDIR}'`;"
+
+    # Use a function replacement so backslashes / group refs in `cmd` are literal.
+    text = COMMAND_RE.sub(lambda _m: cmd, text, count=1)
+    f.write_text(text, encoding="utf-8")
+
+
+def check_pi_cli() -> bool:
+    path = shutil.which("pi")
+    if path:
+        ok(f"pi at {path}")
+        return True
+    warn("pi (Pi coding agent) not found")
+    info("install with:  npm install -g --ignore-scripts @earendil-works/pi-coding-agent")
+    return False
+
+
+def check_pi_web() -> bool:
+    path = shutil.which("pi-web")
+    if path:
+        ok(f"pi-web at {path}")
+        return True
+    warn("pi-web not found")
+    info("install with:  npm install -g @jmfederico/pi-web  (Node 22+), then: pi-web install")
+    return False
 
 
 def patch_greeting(widget_dir: Path, greeting: str) -> None:
@@ -283,8 +337,12 @@ def main() -> int:
     print(f"{BOLD}Übersicht Terminal Widget — installer{RESET}\n")
 
     section("Environment check")
-    deps = [check_ttyd(), check_uebersicht(), check_widgets_dir()]
-    if not all(deps):
+    # ttyd is only needed for the zsh / Pi-TUI backends; pi-web needs none of it.
+    # So a missing ttyd is a warning, not a hard stop — the backend picker will
+    # tell you exactly what each choice needs.
+    check_ttyd()
+    fatal = [check_uebersicht(), check_widgets_dir()]
+    if not all(fatal):
         err("fix the missing pieces above and re-run")
         return 1
 
@@ -304,8 +362,7 @@ def main() -> int:
     section("Instances")
     n = ask_int("How many independent terminal widgets do you want?", default=1, lo=1, hi=8)
 
-    base_port = first_free_port(7681)
-    instances: list[tuple[Path, int, str, str, str]] = []
+    instances: list[tuple] = []
 
     for i in range(n):
         print()
@@ -324,59 +381,105 @@ def main() -> int:
             clone_widget(src, dst)
             ok(f"   cloned to: {dst.name}")
 
-        # Pick a port that is currently free
-        suggested = base_port + i
+        # Pick what runs inside this widget.
+        print(f"   {DIM}backend: what should this console run?{RESET}")
+        print(f"     {DIM}1) zsh     — real shell terminal (ttyd)            [default]{RESET}")
+        print(f"     {DIM}2) pi      — Pi agent TUI in ttyd (Path A)         needs ttyd + pi{RESET}")
+        print(f"     {DIM}3) pi-web  — iframe Pi web UI, no ttyd (Path B)    needs pi-web{RESET}")
+        choice = ask("   choose 1/2/3", default="1")
+        backend = {"1": "zsh", "2": "pi", "3": "pi-web"}.get(choice.strip(), "zsh")
+
+        # Sensible default port per backend, then bump to the first free one.
+        default_port = {"zsh": 7681, "pi": 7690, "pi-web": 8504}[backend]
+        suggested = default_port + i
         while not port_free(suggested):
             suggested += 1
-        port = ask_int("   TTYD port", default=suggested)
+        port = ask_int("   port", default=suggested)
 
+        # Per-backend extras. zdotdir/greeting/autorun only apply to zsh.
         zdotdir = ""
-        if ask_yes_no("   use a custom .zshrc folder for this instance?", default=False):
-            default_dir = os.path.expanduser(
-                f"~/.config/widget-zsh-{name.removesuffix('.widget')}"
-            )
-            zdotdir = ask("     ZDOTDIR (folder with its own .zshrc)", default=default_dir)
-            zdotdir = os.path.expanduser(zdotdir)
-            ensure_zdotdir(zdotdir)
-
-        # Greeting + autorun — only patched when using the bundled zsh/ folder.
-        # (使用者自帶 ZDOTDIR 時由他自己控制 .zshrc。)
         greeting = DEFAULT_GREETING
         autorun = ""
-        if not zdotdir:
-            if ask_yes_no("   customise the welcome greeting line?", default=False):
-                greeting = ask("     greeting text", default=DEFAULT_GREETING)
-            patch_greeting(dst, greeting)
+        vault = ""
+        writable = False
 
-            if ask_yes_no(
-                "   set an auto-run command on every widget start?", default=False
-            ):
-                print(f"     {DIM}examples: 'cd ~/Documents && ls'  /  "
-                      f"'tmux attach -t main || tmux new -s main'  /  'claude'{RESET}")
-                autorun = ask("     autorun command", default="")
-            patch_autorun(dst, autorun)
+        if backend == "zsh":
+            if ask_yes_no("   use a custom .zshrc folder for this instance?", default=False):
+                default_dir = os.path.expanduser(
+                    f"~/.config/widget-zsh-{name.removesuffix('.widget')}"
+                )
+                zdotdir = ask("     ZDOTDIR (folder with its own .zshrc)", default=default_dir)
+                zdotdir = os.path.expanduser(zdotdir)
+                ensure_zdotdir(zdotdir)
+
+            if not zdotdir:
+                if ask_yes_no("   customise the welcome greeting line?", default=False):
+                    greeting = ask("     greeting text", default=DEFAULT_GREETING)
+                patch_greeting(dst, greeting)
+
+                if ask_yes_no(
+                    "   set an auto-run command on every widget start?", default=False
+                ):
+                    print(f"     {DIM}examples: 'cd ~/Documents && ls'  /  "
+                          f"'tmux attach -t main || tmux new -s main'  /  'claude'{RESET}")
+                    autorun = ask("     autorun command", default="")
+                patch_autorun(dst, autorun)
+
+        elif backend == "pi":
+            check_pi_cli()
+            vault = ask(
+                "   Second Brain vault path (working dir; blank = $HOME)", default=""
+            ) if ask_yes_no("   point this Pi at a Second Brain vault?", default=True) else ""
+            if vault:
+                vault = os.path.expanduser(vault)
+                if not Path(vault).is_dir():
+                    warn(f"     {vault} is not an existing folder — Pi will start in $HOME")
+                    vault = ""
+            writable = ask_yes_no(
+                "   allow the agent to WRITE to the vault? (default read-only)", default=False
+            )
+
+        elif backend == "pi-web":
+            check_pi_web()
+            info("   pi-web serves its own web UI; set the vault in ~/.config/pi-web/config.json")
+            info("   one-time setup (if not done):  pi-web install && pi-web doctor")
 
         patch_index(dst, port, zdotdir)
-        ok(f"   patched: TTYD_PORT={port}  ZDOTDIR={zdotdir or '(bundled zsh/)'}")
-        if not zdotdir:
-            ok(f"            greeting: \"{greeting}\"")
-            ok(f"            autorun:  {autorun if autorun else '(none)'}")
-        instances.append((dst, port, zdotdir, greeting, autorun))
+        patch_command(dst, backend, vault, writable)
+
+        label = {"zsh": "zsh terminal", "pi": "Pi agent (ttyd)", "pi-web": "Pi web UI"}[backend]
+        ok(f"   patched: backend={label}  port={port}")
+        if backend == "zsh":
+            ok(f"            ZDOTDIR={zdotdir or '(bundled zsh/)'}")
+            if not zdotdir:
+                ok(f"            greeting: \"{greeting}\"")
+                ok(f"            autorun:  {autorun if autorun else '(none)'}")
+        elif backend == "pi":
+            ok(f"            vault={vault or '($HOME)'}  mode={'writable' if writable else 'read-only'}")
+        instances.append((dst, port, backend, zdotdir, vault, writable, greeting, autorun))
 
     section("Activate")
     refresh_uebersicht()
 
     print()
     ok("Installed:")
-    for dst, port, zdot, greet, autorun in instances:
-        zlabel = zdot if zdot else "bundled zsh/"
-        print(f"   • {dst.name:<40s}  port {port}   {DIM}{zlabel}{RESET}")
-        if not zdot:
-            print(f"     {DIM}greeting: \"{greet}\"{RESET}")
-            print(f"     {DIM}autorun:  {autorun if autorun else '(none)'}{RESET}")
+    for dst, port, backend, zdot, vault, writable, greet, autorun in instances:
+        label = {"zsh": "zsh terminal", "pi": "Pi agent (ttyd)", "pi-web": "Pi web UI"}[backend]
+        print(f"   • {dst.name:<40s}  port {port}   {DIM}{label}{RESET}")
+        if backend == "zsh":
+            zlabel = zdot if zdot else "bundled zsh/"
+            print(f"     {DIM}{zlabel}{RESET}")
+            if not zdot:
+                print(f"     {DIM}greeting: \"{greet}\"{RESET}")
+                print(f"     {DIM}autorun:  {autorun if autorun else '(none)'}{RESET}")
+        elif backend == "pi":
+            print(f"     {DIM}vault: {vault or '($HOME)'}   mode: {'writable' if writable else 'read-only'}{RESET}")
+        elif backend == "pi-web":
+            print(f"     {DIM}iframes http://127.0.0.1:{port} — run 'pi-web install' if not up{RESET}")
     print()
-    info("Logs at /tmp/terminal-widget-ttyd-<port>.log if anything misbehaves.")
-    info("To re-trigger autorun later, run:  pkill -f 'ttyd -p <port>'")
+    info("ttyd logs at /tmp/terminal-widget-ttyd-<port>.log (zsh/pi backends).")
+    info("Pi agent logs at /tmp/terminal-widget-agent-<port>.log (pi backend).")
+    info("To restart a backend: pkill -f 'ttyd -p <port>'  /  pi-web restart")
     return 0
 
 
